@@ -1,0 +1,125 @@
+name: "instance-segmentation"
+platform: "ensemble"
+max_batch_size: 8
+input [
+  {
+    name: "input"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+output [
+  {
+    name: "rles"
+    data_type: TYPE_STRING
+    dims: [ -1 ]
+  }, 
+  {
+    name: "boxes"
+    data_type: TYPE_FP32
+    dims: [ -1, 4 ]
+  },
+  {
+    name: "labels"
+    data_type: TYPE_STRING
+    dims: [ -1 ]
+  },
+  {
+    name: "scores"
+    data_type: TYPE_FP32
+     dims: [ -1 ]
+  }  
+]
+ensemble_scheduling {
+  step [
+    {
+      model_name: "pre"
+      model_version: 1
+      input_map {
+        key: "input"
+        value: "input"
+      }
+      output_map {
+        key: "image"
+        value: "preprocessed_image"
+      }
+      output_map {
+        key: "scale"
+        value: "scale"
+      }
+      output_map {
+        key: "pad"
+        value: "pad"
+      }            
+    },
+    {
+      model_name: "instance-segmentation-infer"
+      model_version: 1
+      input_map {
+        key: "image"
+        value: "preprocessed_image"
+      }
+      output_map {
+        key: "output__0"
+        value: "pred_boxes"
+      }
+      output_map {
+        key: "output__1"
+        value: "pred_labels"
+      }     
+      output_map {
+        key: "output__2"
+        value: "pred_masks"
+      }
+      output_map {
+        key: "output__3"
+        value: "pred_scores"
+      }      
+    },    
+    {
+      model_name: "post"
+      model_version: 1
+      input_map {
+        key: "scale"
+        value: "scale"
+      }     
+      input_map {
+        key: "pad"
+        value: "pad"
+      }            
+      input_map {
+        key: "boxes"
+        value: "pred_boxes"
+      }  
+      input_map {
+        key: "scores"
+        value: "pred_scores"
+      } 
+      input_map {
+        key: "labels"
+        value: "pred_labels"
+      }
+      input_map {
+        key: "masks"
+        value: "pred_masks"
+      }
+      output_map {
+        key: "rles"
+        value: "rles"
+      }      
+      output_map {
+        key: "boxes"
+        value: "boxes"
+      }
+      output_map {
+        key: "labels"
+        value: "labels"
+      }
+      output_map {
+        key: "scores"
+        value: "scores"
+      }
+    }
+  ]
+}
+version_policy: { all { }}

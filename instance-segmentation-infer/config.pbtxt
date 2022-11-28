@@ -1,0 +1,40 @@
+name: "instance-segmentation-infer"
+platform: "pytorch_libtorch"
+max_batch_size: 8
+input [
+  {
+    name: "image",
+    data_type: TYPE_FP32
+    dims: [ 3, -1, -1 ]
+  }
+]
+output [
+  {
+    name: "output__0"
+    data_type: TYPE_FP32
+    dims: [ -1, 4 ]
+  },
+  {
+    name: "output__1"
+    data_type: TYPE_FP32
+    dims: [ -1 ]
+  },
+  {
+    name: "output__2"
+    data_type: TYPE_FP32
+    dims: [ -1, 1, 28, 28]
+  },    
+  {
+    name: "output__3"
+    data_type: TYPE_FP32
+    dims: [ -1 ]
+  } 
+]
+instance_group [
+  {
+    count: 1
+    kind: KIND_CPU
+  }
+]
+dynamic_batching { }
+version_policy: { all { }}
