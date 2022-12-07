@@ -5,6 +5,7 @@ import cv2
 import torch
 
 from typing import List
+from itertools import groupby
 
 from triton_python_backend_utils import Tensor, InferenceResponse, \
     get_input_tensor_by_name, InferenceRequest, get_input_config_by_name, \
@@ -13,18 +14,27 @@ from triton_python_backend_utils import Tensor, InferenceResponse, \
 classes = [line.rstrip('\n') for line in open(os.path.dirname(__file__) + '/classes.txt')]    
 
 
-def rle_encode(mask_image):
-    pixels = mask_image.flatten()
-    # We avoid issues with '1' at the start or end (at the corners of 
-    # the original image) by setting those pixels to '0' explicitly.
-    # We do not expect these to be non-zero for an accurate mask, 
-    # so this should not harm the score.
-    pixels[0] = 0
-    pixels[-1] = 0
-    runs = np.where(pixels[1:] != pixels[:-1])[0] + 2
-    runs[1::2] = runs[1::2] - runs[:-1:2]
-    return runs
-
+def rle_encode(binary_mask):
+    r"""
+    Args:
+        binary_mask: a binary mask with the shape of `mask_shape`
+    
+    Returns uncompressed Run-length Encoding (RLE) in COCO format
+            Link: https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocotools/mask.py
+            {
+                'counts': [n1, n2, n3, ...],
+                'size': [height, width] of the mask
+            }
+    """
+    fortran_binary_mask = np.asfortranarray(binary_mask)
+    uncompressed_rle = {'counts': [], 'size': list(binary_mask.shape)}
+    counts = uncompressed_rle.get('counts')
+    for i, (value, elements) in enumerate(groupby(fortran_binary_mask.ravel(order='F'))):
+        if i == 0 and value == 1:
+            counts.append(0)    # Add 0 if the mask starts with one, since the odd counts are always the number of zeros
+        counts.append(len(list(elements)))
+    
+    return uncompressed_rle
 
 def post_process(boxes, labels, masks, scores, scale, pad, score_threshold=0.7):
     # Resize boxes
@@ -54,7 +64,7 @@ def post_process(boxes, labels, masks, scores, scale, pad, score_threshold=0.7):
         mask = cv2.resize(mask, (int_box[2]-int_box[0]+1, int_box[3]-int_box[1]+1))
         ret_boxes.append([int_box[0], int_box[1], int_box[2]-int_box[0]+1, int_box[3]-int_box[1]+1]) # convert to x,y,w,h
         mask = mask > 0.5
-        rle = rle_encode(mask)
+        rle = rle_encode(mask).get('counts')
         rle = [str(i) for i in rle]
         rle = ",".join(rle) # output batching need to be same shape then convert rle to string for each object mask
         rles.append(rle)
