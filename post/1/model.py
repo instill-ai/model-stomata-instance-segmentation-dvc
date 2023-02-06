@@ -7,9 +7,8 @@ import torch
 from typing import List
 from itertools import groupby
 
-from triton_python_backend_utils import Tensor, InferenceResponse, \
-    get_input_tensor_by_name, InferenceRequest, get_input_config_by_name, \
-    get_output_config_by_name, triton_string_to_numpy
+from triton_python_backend_utils import get_output_config_by_name, triton_string_to_numpy, get_input_config_by_name
+from c_python_backend_utils import Tensor, InferenceResponse, InferenceRequest
 
 classes = [line.rstrip('\n') for line in open(os.path.dirname(__file__) + '/classes.txt')]    
 
