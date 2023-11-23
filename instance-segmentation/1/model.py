@@ -10,7 +10,6 @@ from utils.general import non_max_suppression, scale_coords, check_img_size
 from utils.augmentations import letterbox
 from utils.segment.general import process_mask, process_mask_upsample, scale_masks
 from utils.torch_utils import select_device
-from helper import binary_mask_to_polygon, fit_polygons_to_rotated_bboxes
 from models.common import DetectMultiBackend
 from ray import serve
 from instill.helpers.const import DataType
@@ -317,7 +316,6 @@ if __name__ == "__main__":
             "env_vars": {
                 "PYTHONPATH": os.getcwd(),
             },
-            # "pip": ["pycocotools"],
         },
     )
 
