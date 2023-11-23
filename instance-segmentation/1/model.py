@@ -8,7 +8,7 @@ import numpy as np
 
 from utils.general import non_max_suppression, scale_coords, check_img_size
 from utils.augmentations import letterbox
-from utils.segment.general import process_mask, process_mask_upsample, scale_masks
+from utils.segment.general import process_mask, scale_masks
 from utils.torch_utils import select_device
 from models.common import DetectMultiBackend
 from ray import serve
@@ -319,7 +319,7 @@ if __name__ == "__main__":
         },
     )
 
-    model_config.ray_actor_options["num_cpus"] = 4
+    model_config.ray_actor_options["num_cpus"] = 2
     model_config.ray_actor_options["num_gpus"] = 0.25
 
     if func == "deploy":
