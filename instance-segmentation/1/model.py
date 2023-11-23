@@ -120,7 +120,7 @@ class StomataYolov7:
             ret_scores.append(score)
             ret_labels.append(label)
             int_box = [int(i) for i in box]
-            mask = mask[int_box[1]:int_box[3]+1, int_box[0]:int_box[2]+1]
+            mask = mask[int_box[1] : int_box[3] + 1, int_box[0] : int_box[2] + 1]
             ret_boxes.append(
                 [
                     int_box[0],
@@ -157,7 +157,7 @@ class StomataYolov7:
         image_labels = []
         for enc in input_tensors:
             frame = cv2.imdecode(np.frombuffer(enc, np.uint8), cv2.IMREAD_COLOR)
-            im = letterbox(frame, self.image_size, stride=self.model.stride, auto=True)[0]
+            im = letterbox(frame, self.image_size, stride=self.model.stride)[0]
             im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
             im = np.ascontiguousarray(im)  # contiguous
 
@@ -179,10 +179,14 @@ class StomataYolov7:
             det_masks = []
             for i, det in enumerate(pred):  # per image
                 if len(det):  # per detection
-                    masks = process_mask_upsample(
-                        proto[i], det[:, 6:], det[:, :4], im.shape[2:]
+                    masks = process_mask(
+                        proto[i], det[:, 6:], det[:, :4], im.shape[2:], True
                     )  # HWC
-                    masks = scale_masks(im.shape[2:], masks.permute(1, 2, 0).contiguous().cpu().numpy(), frame.shape)
+                    masks = scale_masks(
+                        im.shape[2:],
+                        masks.permute(1, 2, 0).contiguous().cpu().numpy(),
+                        frame.shape,
+                    )
                     masks = np.transpose(masks, (2, 0, 1))
                     det[:, :4] = scale_coords(
                         im.shape[2:], det[:, :4], frame.shape
@@ -280,7 +284,9 @@ class StomataYolov7:
                 datatype=str(DataType.TYPE_FP32),
             )
         )
-        resp.raw_output_contents.append(np.asarray(rs_scores).astype(np.float32).tobytes())
+        resp.raw_output_contents.append(
+            np.asarray(rs_scores).astype(np.float32).tobytes()
+        )
 
         return resp
 
