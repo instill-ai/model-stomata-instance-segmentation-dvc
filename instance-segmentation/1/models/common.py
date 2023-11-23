@@ -10,31 +10,20 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, ".")
-import cv2
 import numpy as np
 import pandas as pd
-import requests
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
-from torch.cuda import amp
 
-from utils.dataloaders import exif_transpose
-from utils.augmentations import letterbox
+
 from utils.general import (
     LOGGER,
-    Profile,
     colorstr,
     increment_path,
-    make_divisible,
-    non_max_suppression,
-    scale_coords,
-    xywh2xyxy,
     xyxy2xywh,
 )
-from utils.torch_utils import copy_attr, smart_inference_mode
-
 
 def autopad(k, p=None):  # kernel, padding
     # Pad to 'same'
@@ -454,18 +443,6 @@ class DetectMultiBackend(nn.Module):
         fp16=False,
         fuse=True,
     ):
-        # Usage:
-        #   PyTorch:              weights = *.pt
-        #   TorchScript:                    *.torchscript
-        #   ONNX Runtime:                   *.onnx
-        #   ONNX OpenCV DNN:                *.onnx with --dnn
-        #   OpenVINO:                       *.xml
-        #   CoreML:                         *.mlmodel
-        #   TensorRT:                       *.engine
-        #   TensorFlow SavedModel:          *_saved_model
-        #   TensorFlow GraphDef:            *.pb
-        #   TensorFlow Lite:                *.tflite
-        #   TensorFlow Edge TPU:            *_edgetpu.tflite
         from models.experimental import attempt_load  # scoped to avoid circular import
 
         super().__init__()
@@ -494,94 +471,17 @@ class DetectMultiBackend(nn.Module):
         self.__dict__.update(locals())  # assign all variables to self
 
     def forward(self, im, augment=False, visualize=False, val=False):
-        # YOLOv5 MultiBackend inference
         b, ch, h, w = im.shape  # batch, channel, height, width
         if self.fp16 and im.dtype != torch.float16:
             im = im.half()  # to FP16
 
-        if self.pt:  # PyTorch
-            y = (
-                self.model(im, augment=augment, visualize=visualize)
-                if augment or visualize
-                else self.model(im)
-            )
-            if isinstance(y, tuple) and not self.segmentation_model:
-                y = y[0]
-        elif self.jit:  # TorchScript
-            y = self.model(im)[0]
-        elif self.dnn:  # ONNX OpenCV DNN
-            im = im.cpu().numpy()  # torch to numpy
-            self.net.setInput(im)
-            y = self.net.forward()
-        elif self.onnx:  # ONNX Runtime
-            im = im.cpu().numpy()  # torch to numpy
-            y = self.session.run(
-                [self.session.get_outputs()[0].name],
-                {self.session.get_inputs()[0].name: im},
-            )[0]
-        elif self.xml:  # OpenVINO
-            im = im.cpu().numpy()  # FP32
-            y = self.executable_network([im])[self.output_layer]
-        elif self.engine:  # TensorRT
-            if self.dynamic and im.shape != self.bindings["images"].shape:
-                i_in, i_out = (
-                    self.model.get_binding_index(x) for x in ("images", "output")
-                )
-                self.context.set_binding_shape(i_in, im.shape)  # reshape if dynamic
-                self.bindings["images"] = self.bindings["images"]._replace(
-                    shape=im.shape
-                )
-                self.bindings["output"].data.resize_(
-                    tuple(self.context.get_binding_shape(i_out))
-                )
-            s = self.bindings["images"].shape
-            assert (
-                im.shape == s
-            ), f"input size {im.shape} {'>' if self.dynamic else 'not equal to'} max model size {s}"
-            self.binding_addrs["images"] = int(im.data_ptr())
-            self.context.execute_v2(list(self.binding_addrs.values()))
-            y = self.bindings["output"].data
-        elif self.coreml:  # CoreML
-            im = (
-                im.permute(0, 2, 3, 1).cpu().numpy()
-            )  # torch BCHW to numpy BHWC shape(1,320,192,3)
-            im = Image.fromarray((im[0] * 255).astype("uint8"))
-            # im = im.resize((192, 320), Image.ANTIALIAS)
-            y = self.model.predict({"image": im})  # coordinates are xywh normalized
-            if "confidence" in y:
-                box = xywh2xyxy(y["coordinates"] * [[w, h, w, h]])  # xyxy pixels
-                conf, cls = y["confidence"].max(1), y["confidence"].argmax(1).astype(
-                    np.float
-                )
-                y = np.concatenate((box, conf.reshape(-1, 1), cls.reshape(-1, 1)), 1)
-            else:
-                k = "var_" + str(
-                    sorted(int(k.replace("var_", "")) for k in y)[-1]
-                )  # output key
-                y = y[k]  # output
-        else:  # TensorFlow (SavedModel, GraphDef, Lite, Edge TPU)
-            im = (
-                im.permute(0, 2, 3, 1).cpu().numpy()
-            )  # torch BCHW to numpy BHWC shape(1,320,192,3)
-            if self.saved_model:  # SavedModel
-                y = (
-                    self.model(im, training=False) if self.keras else self.model(im)
-                ).numpy()
-            elif self.pb:  # GraphDef
-                y = self.frozen_func(x=self.tf.constant(im)).numpy()
-            else:  # Lite or Edge TPU
-                input, output = self.input_details[0], self.output_details[0]
-                int8 = input["dtype"] == np.uint8  # is TFLite quantized uint8 model
-                if int8:
-                    scale, zero_point = input["quantization"]
-                    im = (im / scale + zero_point).astype(np.uint8)  # de-scale
-                self.interpreter.set_tensor(input["index"], im)
-                self.interpreter.invoke()
-                y = self.interpreter.get_tensor(output["index"])
-                if int8:
-                    scale, zero_point = output["quantization"]
-                    y = (y.astype(np.float32) - zero_point) * scale  # re-scale
-            y[..., :4] *= [w, h, w, h]  # xywh normalized to pixels
+        y = (
+            self.model(im, augment=augment, visualize=visualize)
+            if augment or visualize
+            else self.model(im)
+        )
+        if isinstance(y, tuple) and not self.segmentation_model:
+            y = y[0]
 
         if isinstance(y, np.ndarray):
             y = torch.tensor(y, device=self.device)
@@ -597,151 +497,6 @@ class DetectMultiBackend(nn.Module):
             )  # input
 
             self.forward(im)  # warmup
-
-
-class AutoShape(nn.Module):
-    # YOLOv5 input-robust model wrapper for passing cv2/np/PIL/torch inputs. Includes preprocessing, inference and NMS
-    conf = 0.25  # NMS confidence threshold
-    iou = 0.45  # NMS IoU threshold
-    agnostic = False  # NMS class-agnostic
-    multi_label = False  # NMS multiple labels per box
-    classes = None  # (optional list) filter by class, i.e. = [0, 15, 16] for COCO persons, cats and dogs
-    max_det = 1000  # maximum number of detections per image
-    amp = False  # Automatic Mixed Precision (AMP) inference
-
-    def __init__(self, model, verbose=True):
-        super().__init__()
-        if verbose:
-            LOGGER.info("Adding AutoShape... ")
-        copy_attr(
-            self,
-            model,
-            include=("yaml", "nc", "hyp", "names", "stride", "abc"),
-            exclude=(),
-        )  # copy attributes
-        self.dmb = isinstance(
-            model, DetectMultiBackend
-        )  # DetectMultiBackend() instance
-        self.pt = not self.dmb or model.pt  # PyTorch model
-        self.model = model.eval()
-        if self.pt:
-            m = (
-                self.model.model.model[-1] if self.dmb else self.model.model[-1]
-            )  # Detect()
-            m.inplace = False  # Detect.inplace=False for safe multithread inference
-
-    def _apply(self, fn):
-        # Apply to(), cpu(), cuda(), half() to model tensors that are not parameters or registered buffers
-        self = super()._apply(fn)
-        if self.pt:
-            m = (
-                self.model.model.model[-1] if self.dmb else self.model.model[-1]
-            )  # Detect()
-            m.stride = fn(m.stride)
-            m.grid = list(map(fn, m.grid))
-            if isinstance(m.anchor_grid, list):
-                m.anchor_grid = list(map(fn, m.anchor_grid))
-        return self
-
-    @smart_inference_mode()
-    def forward(self, ims, size=640, augment=False, profile=False):
-        # Inference from various sources. For size(height=640, width=1280), RGB images example inputs are:
-        #   file:        ims = 'data/images/zidane.jpg'  # str or PosixPath
-        #   URI:             = 'https://ultralytics.com/images/zidane.jpg'
-        #   OpenCV:          = cv2.imread('image.jpg')[:,:,::-1]  # HWC BGR to RGB x(640,1280,3)
-        #   PIL:             = Image.open('image.jpg') or ImageGrab.grab()  # HWC x(640,1280,3)
-        #   numpy:           = np.zeros((640,1280,3))  # HWC
-        #   torch:           = torch.zeros(16,3,320,640)  # BCHW (scaled to size=640, 0-1 values)
-        #   multiple:        = [Image.open('image1.jpg'), Image.open('image2.jpg'), ...]  # list of images
-
-        dt = (Profile(), Profile(), Profile())
-        with dt[0]:
-            if isinstance(size, int):  # expand
-                size = (size, size)
-            p = (
-                next(self.model.parameters())
-                if self.pt
-                else torch.empty(1, device=self.model.device)
-            )  # param
-            autocast = self.amp and (
-                p.device.type != "cpu"
-            )  # Automatic Mixed Precision (AMP) inference
-            if isinstance(ims, torch.Tensor):  # torch
-                with amp.autocast(autocast):
-                    return self.model(
-                        ims.to(p.device).type_as(p), augment, profile
-                    )  # inference
-
-            # Pre-process
-            n, ims = (
-                (len(ims), list(ims)) if isinstance(ims, (list, tuple)) else (1, [ims])
-            )  # number, list of images
-            shape0, shape1, files = [], [], []  # image and inference shapes, filenames
-            for i, im in enumerate(ims):
-                f = f"image{i}"  # filename
-                if isinstance(im, (str, Path)):  # filename or uri
-                    im, f = (
-                        Image.open(
-                            requests.get(im, stream=True).raw
-                            if str(im).startswith("http")
-                            else im
-                        ),
-                        im,
-                    )
-                    im = np.asarray(exif_transpose(im))
-                elif isinstance(im, Image.Image):  # PIL Image
-                    im, f = (
-                        np.asarray(exif_transpose(im)),
-                        getattr(im, "filename", f) or f,
-                    )
-                files.append(Path(f).with_suffix(".jpg").name)
-                if im.shape[0] < 5:  # image in CHW
-                    im = im.transpose(
-                        (1, 2, 0)
-                    )  # reverse dataloader .transpose(2, 0, 1)
-                im = (
-                    im[..., :3]
-                    if im.ndim == 3
-                    else cv2.cvtColor(im, cv2.COLOR_GRAY2BGR)
-                )  # enforce 3ch input
-                s = im.shape[:2]  # HWC
-                shape0.append(s)  # image shape
-                g = max(size) / max(s)  # gain
-                shape1.append([y * g for y in s])
-                ims[i] = (
-                    im if im.data.contiguous else np.ascontiguousarray(im)
-                )  # update
-            shape1 = (
-                [make_divisible(x, self.stride) for x in np.array(shape1).max(0)]
-                if self.pt
-                else size
-            )  # inf shape
-            x = [letterbox(im, shape1, auto=False)[0] for im in ims]  # pad
-            x = np.ascontiguousarray(
-                np.array(x).transpose((0, 3, 1, 2))
-            )  # stack and BHWC to BCHW
-            x = torch.from_numpy(x).to(p.device).type_as(p) / 255  # uint8 to fp16/32
-
-        with amp.autocast(autocast):
-            # Inference
-            with dt[1]:
-                y = self.model(x, augment, profile)  # forward
-
-            # Post-process
-            with dt[2]:
-                y = non_max_suppression(
-                    y if self.dmb else y[0],
-                    self.conf,
-                    self.iou,
-                    self.classes,
-                    self.agnostic,
-                    self.multi_label,
-                    max_det=self.max_det,
-                )  # NMS
-                for i in range(n):
-                    scale_coords(shape1, y[i][:, :4], shape0[i])
-
-            return Detections(ims, y, files, dt, self.names, x.shape)
 
 
 class Detections:

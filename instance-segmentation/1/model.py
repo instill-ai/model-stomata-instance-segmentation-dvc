@@ -5,10 +5,10 @@ import ray
 import torch
 import cv2
 import numpy as np
-import torch.backends.cudnn as cudnn
-from utils.general import non_max_suppression, scale_coords
+
+from utils.general import non_max_suppression, scale_coords, check_img_size
 from utils.augmentations import letterbox
-from utils.segment.general import process_mask, process_mask_upsample
+from utils.segment.general import process_mask, process_mask_upsample, scale_masks
 from utils.torch_utils import select_device
 from helper import binary_mask_to_polygon, fit_polygons_to_rotated_bboxes
 from models.common import DetectMultiBackend
@@ -35,10 +35,11 @@ from ray_pb2 import (
 class StomataYolov7:
     def __init__(self, model_path: str):
         self.device = select_device("cuda:0")
-        print(self.device)
         self.model = DetectMultiBackend(
-            model_path, device=self.device, dnn=False, data=None, fp16=False
+            model_path, device=self.device, dnn=False, data=None, fp16=True
         )
+
+        self.image_size = check_img_size(640, s=self.model.stride)
 
         self.model.warmup()  # warmup
 
@@ -46,7 +47,7 @@ class StomataYolov7:
         resp = ModelMetadataResponse(
             name=req.name,
             versions=req.version,
-            framework="onnx",
+            framework="pytorch",
             inputs=[
                 ModelMetadataResponse.TensorMetadata(
                     name="input",
@@ -56,8 +57,20 @@ class StomataYolov7:
             ],
             outputs=[
                 ModelMetadataResponse.TensorMetadata(
-                    name="output",
-                    shape=[1000],
+                    name="rles",
+                    shape=[-1],
+                ),
+                ModelMetadataResponse.TensorMetadata(
+                    name="boxes",
+                    shape=[-1, 4],
+                ),
+                ModelMetadataResponse.TensorMetadata(
+                    name="labels",
+                    shape=[-1],
+                ),
+                ModelMetadataResponse.TensorMetadata(
+                    name="scores",
+                    shape=[-1],
                 ),
             ],
         )
@@ -93,26 +106,21 @@ class StomataYolov7:
 
         return uncompressed_rle
 
-    def post_process(self, boxes, labels, masks, scores, score_threshold=0.3):
+    def post_process(self, boxes, labels, masks, scores, score_threshold=0.7):
         rles = []
         ret_boxes = []
         ret_scores = []
         ret_labels = []
         for mask, box, label, score in zip(masks, boxes, labels, scores):
-            mask = mask.cpu()
             box = box.cpu()
             score = score.cpu()
-            print(mask)
-            print(mask.shape)
-            print(box)
-            print(label)
-            print(score)
             # Showing boxes with score > 0.7
             if score <= score_threshold:
                 continue
             ret_scores.append(score)
             ret_labels.append(label)
             int_box = [int(i) for i in box]
+            mask = mask[int_box[1]:int_box[3]+1, int_box[0]:int_box[2]+1]
             ret_boxes.append(
                 [
                     int_box[0],
@@ -121,6 +129,7 @@ class StomataYolov7:
                     int_box[3] - int_box[1] + 1,
                 ]
             )  # convert to x,y,w,h
+            mask = mask > 0.5
             rle = self.rle_encode(mask).get("counts")
             rle = [str(i) for i in rle]
             rle = ",".join(
@@ -148,9 +157,7 @@ class StomataYolov7:
         image_labels = []
         for enc in input_tensors:
             frame = cv2.imdecode(np.frombuffer(enc, np.uint8), cv2.IMREAD_COLOR)
-            im = letterbox(frame, 640, stride=self.model.stride, auto=True)[
-                0
-            ]  # padded resize
+            im = letterbox(frame, self.image_size, stride=self.model.stride, auto=True)[0]
             im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
             im = np.ascontiguousarray(im)  # contiguous
 
@@ -160,89 +167,33 @@ class StomataYolov7:
             if len(im.shape) == 3:
                 im = im[None]  # expand for batch dim
 
-            print(im)
-            print(im.shape)
-
             pred, out = self.model(im)
             proto = out[1]
             pred = non_max_suppression(
                 pred,
                 conf_thres=0.3,
+                max_det=1000,
                 nm=32,
             )
 
             det_masks = []
-            det_boxes = []
-            det_scores = []
-            det_labels = []
             for i, det in enumerate(pred):  # per image
                 if len(det):  # per detection
                     masks = process_mask_upsample(
                         proto[i], det[:, 6:], det[:, :4], im.shape[2:]
                     )  # HWC
+                    masks = scale_masks(im.shape[2:], masks.permute(1, 2, 0).contiguous().cpu().numpy(), frame.shape)
+                    masks = np.transpose(masks, (2, 0, 1))
                     det[:, :4] = scale_coords(
                         im.shape[2:], det[:, :4], frame.shape
                     ).round()
 
-                    # scale_h = frame.shape[0] / im.shape[2:][0]
-                    # scale_w = frame.shape[1] / im.shape[2:][1]
-                    # scale_ratio = scale_w / scale_h
-
-                    # fitted_rbboxes = []
-                    # categories = []
-                    # confs = []
-                    # for mask, conf in zip(masks, det[:, 4]):
-                    #     polygons = binary_mask_to_polygon(mask.cpu())
-                    #     for j, p in enumerate(polygons):
-                    #         scales = [
-                    #             scale_h if i % 2 != 0 else scale_w
-                    #             for i in range(len(p))
-                    #         ]
-                    #         polygons[j] = [p[i] * scales[i] for i in range(len(p))]
-                    #         # fix height
-                    #         if scale_ratio > 1:
-                    #             polygons[j] = [
-                    #                 frame.shape[0] / 2
-                    #                 + (polygons[j][i] - (frame.shape[0] / 2))
-                    #                 * scale_ratio
-                    #                 if i % 2 != 0
-                    #                 else polygons[j][i]
-                    #                 for i in range(len(p))
-                    #             ]
-                    #         # fix width
-                    #         else:
-                    #             polygons[j] = [
-                    #                 frame.shape[1] / 2
-                    #                 + (polygons[j][i] - (frame.shape[1] / 2))
-                    #                 / scale_ratio
-                    #                 if i % 2 == 0
-                    #                 else polygons[j][i]
-                    #                 for i in range(len(p))
-                    #             ]
-                    #     fitted_rbbox = fit_polygons_to_rotated_bboxes(polygons)
-                    #     if len(fitted_rbbox) < 1:
-                    #         continue
-                    #     fitted_rbbox = fitted_rbbox[0]
-
-                    #     fitted_rbboxes.append(
-                    #         (
-                    #             (fitted_rbbox[0][0], fitted_rbbox[0][1]),
-                    #             (fitted_rbbox[1][0], fitted_rbbox[1][1]),
-                    #             fitted_rbbox[2],
-                    #         )
-                    #     )
-                    #     categories.append("stomata")
-                    #     confs.append(conf)
-
                     det_masks.extend(masks)
-                    det_boxes.extend(det[:, :4])
-                    det_scores.extend(det[:, 4])
-                    det_labels.extend(["stomata"] * len(det))
 
             image_masks.append(det_masks)
-            image_boxes.append(det_boxes)
-            image_scores.append(det_scores)
-            image_labels.append(det_labels)
+            image_boxes.append(pred[0][:, :4])
+            image_scores.append(pred[0][:, 4])
+            image_labels.append(["stomata"] * len(pred[0]))
 
         # og post process
         rs_boxes = []
@@ -279,18 +230,11 @@ class StomataYolov7:
             for _ in range(max_rles - len(rles)):
                 rles.append("")
 
-        print(
-            "=========================================================================================="
-        )
-        print(rs_boxes)
-        print(rs_labels)
-        print(rs_scores)
-        print(rs_rles)
-
+        # rles
         resp.outputs.append(
             InferTensor(
                 name="rles",
-                shape=[-1],
+                shape=[len(input_tensors), len(rs_rles[0])],
                 datatype=str(DataType.TYPE_STRING),
             )
         )
@@ -300,36 +244,43 @@ class StomataYolov7:
         rles_out = [bytes(f"{rles_out[i]}", "utf-8") for i in range(len(rles_out))]
         resp.raw_output_contents.append(serialize_byte_tensor(np.asarray(rles_out)))
 
+        # boxes
         resp.outputs.append(
             InferTensor(
                 name="boxes",
-                shape=[-1, 4],
+                shape=[len(input_tensors), len(rs_boxes[0]), 4],
                 datatype=str(DataType.TYPE_FP32),
             )
         )
-        resp.raw_output_contents.append(np.asarray(rs_boxes).tobytes())
+        resp.raw_output_contents.append(
+            np.asarray(rs_boxes).astype(np.float32).tobytes()
+        )
 
+        # labels
         resp.outputs.append(
             InferTensor(
                 name="labels",
-                shape=[-1],
+                shape=[len(input_tensors), len(rs_labels[0])],
                 datatype=str(DataType.TYPE_STRING),
             )
         )
         labels_out = []
         for r in rs_labels:
             labels_out.extend(r)
-        labels_out = [bytes(f"{labels_out[i]}", "utf-8") for i in range(len(labels_out))]
+        labels_out = [
+            bytes(f"{labels_out[i]}", "utf-8") for i in range(len(labels_out))
+        ]
         resp.raw_output_contents.append(serialize_byte_tensor(np.asarray(labels_out)))
 
+        # scores
         resp.outputs.append(
             InferTensor(
                 name="scores",
-                shape=[-1],
+                shape=[len(input_tensors), len(rs_scores[0])],
                 datatype=str(DataType.TYPE_FP32),
             )
         )
-        resp.raw_output_contents.append(np.asarray(rs_scores).tobytes())
+        resp.raw_output_contents.append(np.asarray(rs_scores).astype(np.float32).tobytes())
 
         return resp
 
@@ -360,6 +311,7 @@ if __name__ == "__main__":
             "env_vars": {
                 "PYTHONPATH": os.getcwd(),
             },
+            # "pip": ["pycocotools"],
         },
     )
 
