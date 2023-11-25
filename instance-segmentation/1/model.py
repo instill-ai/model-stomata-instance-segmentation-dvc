@@ -327,8 +327,8 @@ if __name__ == "__main__":
         },
     )
 
-    model_config.ray_actor_options["num_cpus"] = 2
-    model_config.ray_actor_options["num_gpus"] = 0.25
+    model_config.ray_actor_options["num_cpus"] = 0.4
+    model_config.ray_actor_options["num_gpus"] = 0.1
 
     if func == "deploy":
         deploy_model(model_config=model_config)
