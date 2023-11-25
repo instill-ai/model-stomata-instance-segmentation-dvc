@@ -244,8 +244,11 @@ class StomataYolov7:
         rles_out = []
         for r in rs_rles:
             rles_out.extend(r)
-        rles_out = [bytes(f"{rles_out[i]}", "utf-8") for i in range(len(rles_out))]
-        resp.raw_output_contents.append(serialize_byte_tensor(np.asarray(rles_out)))
+        if len(rles_out) != 0:
+            rles_out = [bytes(f"{rles_out[i]}", "utf-8") for i in range(len(rles_out))]
+            resp.raw_output_contents.append(serialize_byte_tensor(np.asarray(rles_out)))
+        else:
+            resp.raw_output_contents.append(b"")
 
         # boxes
         resp.outputs.append(
@@ -270,10 +273,15 @@ class StomataYolov7:
         labels_out = []
         for r in rs_labels:
             labels_out.extend(r)
-        labels_out = [
-            bytes(f"{labels_out[i]}", "utf-8") for i in range(len(labels_out))
-        ]
-        resp.raw_output_contents.append(serialize_byte_tensor(np.asarray(labels_out)))
+        if len(labels_out) != 0:
+            labels_out = [
+                bytes(f"{labels_out[i]}", "utf-8") for i in range(len(labels_out))
+            ]
+            resp.raw_output_contents.append(
+                serialize_byte_tensor(np.asarray(labels_out))
+            )
+        else:
+            resp.raw_output_contents.append(b"")
 
         # scores
         resp.outputs.append(
