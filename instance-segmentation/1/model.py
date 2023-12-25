@@ -292,5 +292,4 @@ class StomataYolov7:
         return resp
 
 
-deployable = InstillDeployable(StomataYolov7, "model.pt")
-deployable.update_num_cpus(4)
+deployable = InstillDeployable(StomataYolov7, "model.pt", False)
