@@ -292,5 +292,6 @@ class StomataYolov7:
         return resp
 
 
-deployable = InstillDeployable(StomataYolov7, "model.pt")
-deployable.update_num_gpus(0.25)
+deployable = InstillDeployable(StomataYolov7, "model.pt", True)
+deployable.update_max_replicas(8)
+deployable.update_min_replicas(0)
