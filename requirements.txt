@@ -1,5 +1,7 @@
 streamlit==1.29.0
+streamlit-image-select==0.6.0
 instill-sdk==0.5.0rc5
 opencv-python-headless==4.8.1.78
 pycocotools==2.0.7
 scikit-image==0.22.0
+
