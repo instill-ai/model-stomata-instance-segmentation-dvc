@@ -14,12 +14,10 @@ from instill.helpers.ray_io import serialize_byte_tensor, deserialize_bytes_tens
 from instill.helpers.ray_config import instill_deployment, InstillDeployable
 
 from ray_pb2 import (
-    ModelReadyRequest,
-    ModelReadyResponse,
     ModelMetadataRequest,
     ModelMetadataResponse,
-    ModelInferRequest,
-    ModelInferResponse,
+    RayServiceCallRequest,
+    RayServiceCallResponse,
     InferTensor,
 )
 
@@ -67,10 +65,6 @@ class StomataYolov7:
                 ),
             ],
         )
-        return resp
-
-    def ModelReady(self, req: ModelReadyRequest) -> ModelReadyResponse:
-        resp = ModelReadyResponse(ready=True)
         return resp
 
     def rle_encode(self, binary_mask):
@@ -132,8 +126,8 @@ class StomataYolov7:
 
         return rles, ret_boxes, ret_labels, ret_scores
 
-    async def ModelInfer(self, request: ModelInferRequest) -> ModelInferResponse:
-        resp = ModelInferResponse(
+    async def __call__(self, request: RayServiceCallRequest) -> RayServiceCallResponse:
+        resp = RayServiceCallResponse(
             model_name=request.model_name,
             model_version=request.model_version,
             outputs=[],
