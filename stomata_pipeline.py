@@ -6,7 +6,9 @@ import cv2
 import pandas as pd
 import streamlit as st
 import numpy as np
+from pathlib import Path
 from PIL import Image
+from streamlit_image_select import image_select
 from pycocotools import mask as cocomask
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
@@ -27,18 +29,38 @@ def cv2_base64(image):
     return base64_str
 
 
+def sample_input():
+    img = image_select(
+        label="Select a sample image to inference",
+        use_container_width=False,
+        images=[
+            "samples/c_tr_56_cut_want.jpg",
+            "samples/c_tr_68_cut_want.jpg",
+            "samples/u_tr_26.png",
+        ],
+    )
+    img = cv2.imread(img)
+    image_dict = {"sample.jpg": img}
+    preprocess_and_render_layout(image_dict)
+
+
 def image_input():
     list_of_img_bytes = st.sidebar.file_uploader(
         "Upload one or more images",
         type=["png", "jpeg", "jpg"],
         accept_multiple_files=True,
     )
+
     image_dict = {}
     if len(list_of_img_bytes) > 0:
         for img_bytes in list_of_img_bytes:
             file_bytes = np.asarray(bytearray(img_bytes.read()), dtype=np.uint8)
             image_dict[img_bytes.name] = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
+        preprocess_and_render_layout(image_dict)
+
+
+def preprocess_and_render_layout(image_dict):
     if len(image_dict) > 0:
         # inference
         outputs = infer_image(image_dict)
@@ -115,7 +137,7 @@ def image_input():
                 predicted_image = cv2.drawContours(
                     predicted_image, [box], 0, color=c, thickness=2
                 )
-                t_size = cv2.getTextSize(f'idx:{idx}', 0, fontScale=0.5, thickness=1)[0]
+                t_size = cv2.getTextSize(f"idx:{idx}", 0, fontScale=0.5, thickness=1)[0]
                 pt = np.amax(box, axis=0)
                 c1 = (pt[0], pt[1])
                 c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
@@ -124,7 +146,7 @@ def image_input():
                 )  # filled
                 cv2.putText(
                     predicted_image,
-                    f'idx:{idx}',
+                    f"idx:{idx}",
                     (c1[0], c1[1] - 2),
                     0,
                     0.5,
@@ -224,7 +246,8 @@ def infer_image(images_dict: dict, process_field=None):
             time.sleep(0.1)
         latest_op = stomata_pipeline.get_operation(op)
         response_dict = MessageToDict(latest_op.response)
-        responses.append(response_dict["outputs"])
+        if len(response_dict) > 0:
+            responses.append(response_dict["outputs"])
 
     return responses
 
@@ -240,14 +263,28 @@ st.set_page_config(layout="wide")
 st.title("Stomata detection with YoloV7")
 st.sidebar.title("Settings")
 
+lang = st.toggle("Toggle for Chinese")
+if not lang:
+    st.markdown(
+        Path("markdowns/readme_EN.md").read_text("utf-8"), unsafe_allow_html=True
+    )
+else:
+    st.markdown(
+        Path("markdowns/readme_CH.md").read_text("utf-8"), unsafe_allow_html=True
+    )
+
 client = InstillClient()
 pipeline_service = client.pipeline_service
 stomata_pipeline = Pipeline(client=client, name="stomata-detection")
 
 # input options
-input_option = st.sidebar.radio("Select input type: ", ["image"])
+input_option = st.sidebar.radio(
+    "Select input type: ", ["sample image", "self-upload image"]
+)
 
-if input_option == "image":
+if input_option == "self-upload image":
     image_input()
+elif input_option == "sample image":
+    sample_input()
 # else:
-    # video_input()
+# video_input()
