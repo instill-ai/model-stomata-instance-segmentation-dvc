@@ -67,8 +67,9 @@ def preprocess_and_render_layout(image_dict):
 
         # visualize
         col1, col2, col3 = st.columns(3)
-        col1.header("original image")
-        col2.header("predicted image")
+        col1.header("Original image")
+        col2.header("Image with prediction")
+        col3.header("Stomata prediction metrics")
         for (file_name, orig_img), output in zip(image_dict.items(), outputs):
             col1, col2, col3 = st.columns(3)
             predictions = output[0]["objects"]
