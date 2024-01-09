@@ -1,7 +1,7 @@
 ## StomaVision User Guide
 
 - **Data Type Selection**: First, decide whether to use videos or photos.
-- **Photos**: The recommended size is a long axis of less than 2000 pixels (e.g., 1920x1080 or 1280x960 pixels). A magnification of 40X is recommended for the objective lens. Other magnifications may affect prediction accuracy. Multiple photos can be uploaded at once.
+- **Photos**: The recommended size is a long axis of less than 2000 pixels (e.g., 1920x1080 or 1280x960 pixels). A magnification of 20X is recommended for the objective lens. Other magnifications may affect prediction accuracy. Multiple photos can be uploaded at once.
 - **Videos**: The recommended size is 1080p (HD): 1920x1080 pixels. The frame rate (FPS) should be between 15-30 FPS, depending on the speed of microscope field movement and focusing. Considering network speed, it is recommended to upload videos of 30-60 seconds in length. (Yet to be implemented)
 - **Output Results**:
   - **Images**:
