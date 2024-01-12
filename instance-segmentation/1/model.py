@@ -12,13 +12,10 @@ from models.common import DetectMultiBackend
 from instill.helpers.const import DataType
 from instill.helpers.ray_io import serialize_byte_tensor, deserialize_bytes_tensor
 from instill.helpers.ray_config import instill_deployment, InstillDeployable
-
-from ray_pb2 import (
-    ModelMetadataRequest,
-    ModelMetadataResponse,
-    RayServiceCallRequest,
-    RayServiceCallResponse,
-    InferTensor,
+from instill.helpers import (
+    construct_infer_response,
+    construct_metadata_response,
+    Metadata,
 )
 
 
@@ -34,33 +31,35 @@ class StomataYolov7:
 
         self.model.warmup()  # warmup
 
-    def ModelMetadata(self, req: ModelMetadataRequest) -> ModelMetadataResponse:
-        resp = ModelMetadataResponse(
-            name=req.name,
-            versions=req.version,
-            framework="pytorch",
+    def ModelMetadata(self, req):
+        resp = construct_metadata_response(
+            req=req,
             inputs=[
-                ModelMetadataResponse.TensorMetadata(
+                Metadata(
                     name="input",
                     datatype=str(DataType.TYPE_STRING.name),
                     shape=[1],
                 ),
             ],
             outputs=[
-                ModelMetadataResponse.TensorMetadata(
+                Metadata(
                     name="rles",
+                    datatype=str(DataType.TYPE_STRING.name),
                     shape=[-1],
                 ),
-                ModelMetadataResponse.TensorMetadata(
+                Metadata(
                     name="boxes",
+                    datatype=str(DataType.TYPE_FP32),
                     shape=[-1, 4],
                 ),
-                ModelMetadataResponse.TensorMetadata(
+                Metadata(
                     name="labels",
+                    datatype=str(DataType.TYPE_STRING.name),
                     shape=[-1],
                 ),
-                ModelMetadataResponse.TensorMetadata(
+                Metadata(
                     name="scores",
+                    datatype=str(DataType.TYPE_FP32),
                     shape=[-1],
                 ),
             ],
@@ -126,15 +125,8 @@ class StomataYolov7:
 
         return rles, ret_boxes, ret_labels, ret_scores
 
-    async def __call__(self, request: RayServiceCallRequest) -> RayServiceCallResponse:
-        resp = RayServiceCallResponse(
-            model_name=request.model_name,
-            model_version=request.model_version,
-            outputs=[],
-            raw_output_contents=[],
-        )
-
-        b_tensors = request.raw_input_contents[0]
+    async def __call__(self, req):
+        b_tensors = req.raw_input_contents[0]
 
         input_tensors = deserialize_bytes_tensor(b_tensors)
 
@@ -221,9 +213,12 @@ class StomataYolov7:
             for _ in range(max_rles - len(rles)):
                 rles.append("")
 
+        resp_outputs = []
+        resp_raw_outputs = []
+
         # rles
-        resp.outputs.append(
-            InferTensor(
+        resp_outputs.append(
+            Metadata(
                 name="rles",
                 shape=[len(input_tensors), len(rs_rles[0])],
                 datatype=str(DataType.TYPE_STRING),
@@ -234,25 +229,23 @@ class StomataYolov7:
             rles_out.extend(r)
         if len(rles_out) != 0:
             rles_out = [bytes(f"{rles_out[i]}", "utf-8") for i in range(len(rles_out))]
-            resp.raw_output_contents.append(serialize_byte_tensor(np.asarray(rles_out)))
+            resp_raw_outputs.append(serialize_byte_tensor(np.asarray(rles_out)))
         else:
-            resp.raw_output_contents.append(b"")
+            resp_raw_outputs.append(b"")
 
         # boxes
-        resp.outputs.append(
-            InferTensor(
+        resp_outputs.append(
+            Metadata(
                 name="boxes",
                 shape=[len(input_tensors), len(rs_boxes[0]), 4],
                 datatype=str(DataType.TYPE_FP32),
             )
         )
-        resp.raw_output_contents.append(
-            np.asarray(rs_boxes).astype(np.float32).tobytes()
-        )
+        resp_raw_outputs.append(np.asarray(rs_boxes).astype(np.float32).tobytes())
 
         # labels
-        resp.outputs.append(
-            InferTensor(
+        resp_outputs.append(
+            Metadata(
                 name="labels",
                 shape=[len(input_tensors), len(rs_labels[0])],
                 datatype=str(DataType.TYPE_STRING),
@@ -265,25 +258,25 @@ class StomataYolov7:
             labels_out = [
                 bytes(f"{labels_out[i]}", "utf-8") for i in range(len(labels_out))
             ]
-            resp.raw_output_contents.append(
-                serialize_byte_tensor(np.asarray(labels_out))
-            )
+            resp_raw_outputs.append(serialize_byte_tensor(np.asarray(labels_out)))
         else:
-            resp.raw_output_contents.append(b"")
+            resp_raw_outputs.append(b"")
 
         # scores
-        resp.outputs.append(
-            InferTensor(
+        resp_outputs.append(
+            Metadata(
                 name="scores",
                 shape=[len(input_tensors), len(rs_scores[0])],
                 datatype=str(DataType.TYPE_FP32),
             )
         )
-        resp.raw_output_contents.append(
-            np.asarray(rs_scores).astype(np.float32).tobytes()
-        )
+        resp_raw_outputs.append(np.asarray(rs_scores).astype(np.float32).tobytes())
 
-        return resp
+        return construct_infer_response(
+            req=req,
+            outputs=resp_outputs,
+            raw_outputs=resp_raw_outputs,
+        )
 
 
 deployable = InstillDeployable(StomataYolov7, "model.pt", False)
