@@ -1,3 +1,4 @@
+# pylint: disable=no-member,wrong-import-position,no-name-in-module
 import io
 import os
 import time
@@ -275,7 +276,6 @@ else:
     )
 
 client = InstillClient()
-pipeline_service = client.pipeline_service
 stomata_pipeline = Pipeline(client=client, name="stomata-detection")
 
 # input options
