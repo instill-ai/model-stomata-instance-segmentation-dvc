@@ -71,7 +71,8 @@ def preprocess_and_render_layout(image_dict):
         col1.header("Original image")
         col2.header("Image with prediction")
         col3.header("Stomata prediction metrics")
-        for (file_name, orig_img), output in zip(image_dict.items(), outputs):
+        for file_name, output in outputs.items():
+            orig_img = image_dict[file_name]
             col1, col2, col3 = st.columns(3)
             predictions = output[0]["objects"]
             predicted_image = output[0]["vis"]
@@ -227,7 +228,7 @@ def video_input():
 
 
 def infer_image(images_dict: dict, process_field=None):
-    operations = []
+    operations = {}
     for idx, img in images_dict.items():
         if process_field is not None:
             process_field.text(
@@ -236,10 +237,10 @@ def infer_image(images_dict: dict, process_field=None):
         i = Struct()
         i.update({"input": cv2_base64(img)})
         operation = stomata_pipeline.trigger_async([i])
-        operations.append(operation)
+        operations[idx] = operation
 
-    responses = []
-    for idx, op in enumerate(operations):
+    responses = {}
+    for idx, op in operations.items():
         if process_field is not None:
             process_field.text(
                 f"operation done for video frame: {idx}/{len(operations)}"
@@ -250,8 +251,8 @@ def infer_image(images_dict: dict, process_field=None):
             operation = stomata_pipeline.get_operation(operation, silent=True)
         if operation is not None:
             response_dict = MessageToDict(operation.response)
-            if len(response_dict) > 0:
-                responses.append(response_dict["outputs"])
+            if len(response_dict) > 0 and "outputs" in response_dict:
+                responses[idx]= response_dict["outputs"]
 
     return responses
 
