@@ -244,12 +244,14 @@ def infer_image(images_dict: dict, process_field=None):
             process_field.text(
                 f"operation done for video frame: {idx}/{len(operations)}"
             )
-        while not stomata_pipeline.get_operation(op).done:
-            time.sleep(0.1)
-        latest_op = stomata_pipeline.get_operation(op)
-        response_dict = MessageToDict(latest_op.response)
-        if len(response_dict) > 0:
-            responses.append(response_dict["outputs"])
+        operation = stomata_pipeline.get_operation(op, silent=True)
+        while operation is not None and not operation.done:
+            time.sleep(0.5)
+            operation = stomata_pipeline.get_operation(operation, silent=True)
+        if operation is not None:
+            response_dict = MessageToDict(operation.response)
+            if len(response_dict) > 0:
+                responses.append(response_dict["outputs"])
 
     return responses
 
