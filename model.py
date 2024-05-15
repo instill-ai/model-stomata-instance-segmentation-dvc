@@ -21,10 +21,10 @@ from instill.helpers import (
 
 @instill_deployment
 class StomataYolov7:
-    def __init__(self, model_path: str):
+    def __init__(self):
         self.device = select_device("cuda:0")
         self.model = DetectMultiBackend(
-            model_path, device=self.device, dnn=False, data=None, fp16=True
+            "model.pt", device=self.device, dnn=False, data=None, fp16=True
         )
 
         self.image_size = check_img_size(640, s=self.model.stride)
@@ -279,6 +279,4 @@ class StomataYolov7:
         )
 
 
-deployable = InstillDeployable(StomataYolov7, "model.pt", True)
-deployable.update_max_replicas(8)
-deployable.update_min_replicas(0)
+entrypoint = InstillDeployable(StomataYolov7).get_deployment_handle()
