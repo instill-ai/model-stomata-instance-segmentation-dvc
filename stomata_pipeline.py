@@ -64,7 +64,7 @@ def image_input():
 def preprocess_and_render_layout(image_dict):
     if len(image_dict) > 0:
         # inference
-        outputs = infer_image(image_dict)
+        outputs = batch_infer_image(image_dict)
 
         # visualize
         col1, col2, col3 = st.columns(3)
@@ -202,7 +202,7 @@ def video_input():
             frame_num += 1
         cap.release()
 
-        outputs = infer_image(image_dict, vid)
+        outputs = batch_infer_image(image_dict, vid)
         vis_vid_file = "./vis." + vid_bytes.name.split(".")[-1]
         vid_writer = cv2.VideoWriter(
             vis_vid_file,
@@ -213,21 +213,29 @@ def video_input():
                 int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
             ),
         )
-        for o in outputs:
-            predicted_image = o[0]["vis"]
+        for _, output in outputs.items():
+            predicted_image = output[0]["vis"]
             predicted_image = np.array(
                 Image.open(io.BytesIO(base64.b64decode(predicted_image.split(",")[1])))
             )
             vid_writer.write(predicted_image)
 
-        with open(vid_file, "rb") as v:
+        with open(vis_vid_file, "rb") as v:
             vid_bytes = v.read()
             vid.video(vid_bytes)
 
         os.remove(vid_file)
 
 
-def infer_image(images_dict: dict, process_field=None):
+def infer_image(image) -> list:
+    i = Struct()
+    i.update({"input": cv2_base64(image)})
+    output, _ = stomata_pipeline([i], True)
+
+    return output
+
+
+def batch_infer_image(images_dict: dict, process_field=None) -> dict:
     operations = {}
     for idx, img in images_dict.items():
         if process_field is not None:
@@ -252,7 +260,7 @@ def infer_image(images_dict: dict, process_field=None):
         if operation is not None:
             response_dict = MessageToDict(operation.response)
             if len(response_dict) > 0 and "outputs" in response_dict:
-                responses[idx]= response_dict["outputs"]
+                responses[idx] = response_dict["outputs"]
 
     return responses
 
@@ -279,16 +287,17 @@ else:
     )
 
 client = InstillClient()
-stomata_pipeline = Pipeline(client=client, name="stomata-detection")
+# client.pipeline_service.target_namespace = "organizations/abrc"
+stomata_pipeline = Pipeline(client=client, name="stomavision")
 
 # input options
 input_option = st.sidebar.radio(
-    "Select input type: ", ["sample image", "self-upload image"]
+    "Select input type: ", ["sample image", "self-upload image", "self-upload video"]
 )
 
 if input_option == "self-upload image":
     image_input()
 elif input_option == "sample image":
     sample_input()
-# else:
-# video_input()
+elif input_option == "self-upload video":
+    video_input()
