@@ -1,12 +1,12 @@
 # pylint: disable=no-member,wrong-import-position,no-name-in-module
 import io
-import os
 import time
 import base64
 import cv2
 import pandas as pd
 import streamlit as st
 import numpy as np
+from tempfile import NamedTemporaryFile
 from pathlib import Path
 from PIL import Image
 from streamlit_image_select import image_select
@@ -61,19 +61,24 @@ def image_input():
         preprocess_and_render_layout(image_dict)
 
 
-def preprocess_and_render_layout(image_dict):
+def preprocess_and_render_layout(image_dict, process_field=None):
     if len(image_dict) > 0:
         # inference
-        outputs = batch_infer_image(image_dict)
+        outputs = batch_infer_image(image_dict, process_field)
 
         # visualize
-        col1, col2, col3 = st.columns(3)
-        col1.header("Original image")
-        col2.header("Image with prediction")
-        col3.header("Stomata prediction metrics")
+        if process_field is None:
+            col1, col2, col3 = st.columns(3)
+            col1.header("Original image")
+            col2.header("Image with prediction")
+            col3.header("Stomata prediction metrics")
+        else:
+            process_field.text("Average measurements per frame")
+            t_measurements = []
         for file_name, output in outputs.items():
             orig_img = image_dict[file_name]
-            col1, col2, col3 = st.columns(3)
+            if process_field is None:
+                col1, col2, col3 = st.columns(3)
             predictions = output[0]["objects"]
             predicted_image = output[0]["vis"]
             predicted_image = np.array(
@@ -126,37 +131,45 @@ def preprocess_and_render_layout(image_dict):
                     )
                 )
 
-                rb = (
-                    (
-                        bbox["left"] + fitted_rbbox[0][0],
-                        bbox["top"] + fitted_rbbox[0][1],
-                    ),
-                    (fitted_rbbox[1][0], fitted_rbbox[1][1]),
-                    fitted_rbbox[2],
-                )
-                c = random_color()
-                box = cv2.boxPoints(rb)
-                box = np.intp(box)
-                predicted_image = cv2.drawContours(
-                    predicted_image, [box], 0, color=c, thickness=2
-                )
-                t_size = cv2.getTextSize(f"idx:{idx}", 0, fontScale=0.5, thickness=1)[0]
-                pt = np.amax(box, axis=0)
-                c1 = (pt[0], pt[1])
-                c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
-                cv2.rectangle(
-                    predicted_image, c1, c2, color=c, thickness=-1, lineType=cv2.LINE_AA
-                )  # filled
-                cv2.putText(
-                    predicted_image,
-                    f"idx:{idx}",
-                    (c1[0], c1[1] - 2),
-                    0,
-                    0.5,
-                    [255, 255, 255],
-                    thickness=1,
-                    lineType=cv2.LINE_AA,
-                )
+                if process_field is None:
+                    rb = (
+                        (
+                            bbox["left"] + fitted_rbbox[0][0],
+                            bbox["top"] + fitted_rbbox[0][1],
+                        ),
+                        (fitted_rbbox[1][0], fitted_rbbox[1][1]),
+                        fitted_rbbox[2],
+                    )
+                    c = random_color()
+                    box = cv2.boxPoints(rb)
+                    box = np.intp(box)
+                    predicted_image = cv2.drawContours(
+                        predicted_image, [box], 0, color=c, thickness=2
+                    )
+                    t_size = cv2.getTextSize(
+                        f"idx:{idx}", 0, fontScale=0.5, thickness=1
+                    )[0]
+                    pt = np.amax(box, axis=0)
+                    c1 = (pt[0], pt[1])
+                    c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
+                    cv2.rectangle(
+                        predicted_image,
+                        c1,
+                        c2,
+                        color=c,
+                        thickness=-1,
+                        lineType=cv2.LINE_AA,
+                    )  # filled
+                    cv2.putText(
+                        predicted_image,
+                        f"idx:{idx}",
+                        (c1[0], c1[1] - 2),
+                        0,
+                        0.5,
+                        [255, 255, 255],
+                        thickness=1,
+                        lineType=cv2.LINE_AA,
+                    )
 
             df = pd.DataFrame(
                 measurements,
@@ -170,69 +183,107 @@ def preprocess_and_render_layout(image_dict):
                 ],
             )
 
-            with col1:
-                st.image(orig_img, channels="BGR", caption=file_name)
-            with col2:
-                st.image(predicted_image, caption=file_name)
-            with col3:
-                st.dataframe(df)
+            if process_field is None:
+                with col1:
+                    st.image(orig_img, channels="BGR", caption=file_name)
+                with col2:
+                    st.image(predicted_image, caption=file_name)
+                with col3:
+                    st.dataframe(df)
+            else:
+                long_axis_list = [t[2] for t in measurements]
+                short_axis_list = [t[3] for t in measurements]
+                ratio_list = [t[4] for t in measurements]
+                area_axis_list = [t[5] for t in measurements]
+                avg_long_axis = sum(long_axis_list) / len(long_axis_list)
+                avg_short_axis = sum(short_axis_list) / len(short_axis_list)
+                avg_ratio = sum(ratio_list) / len(ratio_list)
+                avg_area = sum(area_axis_list) / len(area_axis_list)
+                t_measurements.append(
+                    (
+                        measurements[0][0],
+                        measurements[0][1],
+                        avg_long_axis,
+                        avg_short_axis,
+                        avg_ratio,
+                        avg_area,
+                    )
+                )
+
+        if process_field is not None:
+            df = pd.DataFrame(
+                t_measurements,
+                columns=[
+                    "img_height",
+                    "img_width",
+                    "avg_long_axis",
+                    "avg_short_axis",
+                    "avg_ratio",
+                    "avg_area",
+                ],
+            )
+            st.dataframe(df)
 
 
 def video_input():
-    vid_file = None
     vid_bytes = st.sidebar.file_uploader("Upload a video", type=["mp4", "mpv", "avi"])
     if vid_bytes:
-        vid_file = "./input." + vid_bytes.name.split(".")[-1]
-        with open(vid_file, "wb") as out:
-            out.write(vid_bytes.read())
+        with NamedTemporaryFile(
+            suffix=f".{vid_bytes.name.split('.')[-1]}"
+        ) as input_video:
+            input_video.write(vid_bytes.read())
 
-    if vid_file:
-        cap = cv2.VideoCapture(vid_file)
-        cap_fps = cap.get(cv2.CAP_PROP_FPS)
+            if input_video:
+                cap = cv2.VideoCapture(input_video.name)
+                # cap_fps = cap.get(cv2.CAP_PROP_FPS)
 
-        st.markdown("---")
-        vid = st.empty()
-        frame_num = 0
-        image_dict = {}
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            image_dict[f"frame{frame_num}"] = frame
-            frame_num += 1
-        cap.release()
+                st.markdown("---")
+                vid = st.empty()
+                frame_num = 0
+                image_dict = {}
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    image_dict[f"frame{frame_num}"] = frame
+                    frame_num += 1
+                cap.release()
 
-        outputs = batch_infer_image(image_dict, vid)
-        vis_vid_file = "./vis." + vid_bytes.name.split(".")[-1]
-        vid_writer = cv2.VideoWriter(
-            vis_vid_file,
-            cv2.VideoWriter_fourcc(*"MJPG"),
-            cap_fps,
-            (
-                int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-            ),
-        )
-        for _, output in outputs.items():
-            predicted_image = output[0]["vis"]
-            predicted_image = np.array(
-                Image.open(io.BytesIO(base64.b64decode(predicted_image.split(",")[1])))
-            )
-            vid_writer.write(predicted_image)
+                preprocess_and_render_layout(image_dict, vid)
 
-        with open(vis_vid_file, "rb") as v:
-            vid_bytes = v.read()
-            vid.video(vid_bytes)
+                # TODO: if needed to support video playback
+                # with NamedTemporaryFile(
+                #     suffix=f".{vid_bytes.name.split('.')[-1]}"
+                # ) as vis_video:
+                #     vid_writer = cv2.VideoWriter(
+                #         vis_video.name,
+                #         cv2.VideoWriter_fourcc(*'MJPG'),
+                #         cap_fps,
+                #         (
+                #             int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                #             int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                #         ),
+                #     )
+                #     print(input_video.name)
+                #     print(vis_video.name)
+                #     print(vid_writer.isOpened())
+                #     for _, output in outputs.items():
+                #         predicted_image = output[0]["vis"]
+                #         predicted_image = np.array(
+                #             Image.open(
+                #                 io.BytesIO(
+                #                     base64.b64decode(predicted_image.split(",")[1])
+                #                 )
+                #             )
+                #         )
+                #         vid_writer.write(predicted_image)
 
-        os.remove(vid_file)
+                #     vid_writer.release()
+                #     print(os.path.getsize(vis_video.name))
+                #     vis_video.seek(0)
 
-
-def infer_image(image) -> list:
-    i = Struct()
-    i.update({"input": cv2_base64(image)})
-    output, _ = stomata_pipeline([i], True)
-
-    return output
+                #     vid_bytes = vis_video.read()
+                #     vid.video(vid_bytes)
 
 
 def batch_infer_image(images_dict: dict, process_field=None) -> dict:
@@ -287,7 +338,7 @@ else:
     )
 
 client = InstillClient()
-# client.pipeline_service.target_namespace = "organizations/abrc"
+client.pipeline_service.target_namespace = "organizations/abrc"
 stomata_pipeline = Pipeline(client=client, name="stomavision")
 
 # input options
