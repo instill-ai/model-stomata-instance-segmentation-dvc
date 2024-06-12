@@ -207,6 +207,7 @@ def preprocess_and_render_layout(image_dict, process_field=None):
                         avg_short_axis,
                         avg_ratio,
                         avg_area,
+                        len(measurements),
                     )
                 )
 
@@ -220,6 +221,7 @@ def preprocess_and_render_layout(image_dict, process_field=None):
                     "avg_short_axis",
                     "avg_ratio",
                     "avg_area",
+                    "total_stomata_in_frame",
                 ],
             )
             st.dataframe(df)
