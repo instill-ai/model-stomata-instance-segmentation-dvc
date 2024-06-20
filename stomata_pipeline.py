@@ -88,7 +88,7 @@ def preprocess_and_render_layout(image_dict, process_field=None):
             measurements = []  # measurement = (id, long_axis, short_axis, ratio, area)
             # post process
             for idx, pred in enumerate(predictions):
-                bbox = pred["bounding_box"]
+                bbox = pred["bounding-box"]
                 category = pred["category"]
                 rle = pred["rle"]
                 score = pred["score"]
